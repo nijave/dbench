@@ -1,0 +1,53 @@
+include:
+  # This should enable pipelines to run on default branches and MRs only
+  - template: Workflows/MergeRequest-Pipelines.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - project: 'infrastructure/renovate-bot'
+    file: 'renovate-config-validator.gitlab-ci.yml'
+    rules:
+      - changes:
+        - renovate.json
+        - .gitlab/renovate.json
+
+  # Container Specific pipelines are below
+  # - project: 'infrastructure/ci'
+  #   file: 'templates/trivy.gitlab-ci.yml'
+  - component: $CI_SERVER_HOST/ci/components/kaniko/kaniko@v1.4.1
+    inputs:
+      dockerhub_enable: "true"
+      dockerhub_enable_short_sha: "true"
+
+  - component: $CI_SERVER_HOST/ci/components/trivy/container@v1.3.2
+
+variables:
+  SLSA_PROVENANCE_SCHEMA_VERSION: v1
+
+stages:
+ - build
+ - test
+ - release
+
+# semantic-release job
+semantic-release:
+  image: ghcr.io/containerbase/node:20.17.0@sha256:5dbdae64c15c79e271d52e9c772015e868fd8168d9623e13db6eabb4a791b11e
+  stage: release
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - .npm/
+  variables:
+    GIT_AUTHOR_EMAIL: release-bot@stolenleadsmen.com
+    GIT_COMMITTER_EMAIL: release-bot@stolenleadsmen.com
+    GIT_DEPTH: '0'
+  before_script:
+    # - npm --cache .npm --prefer-offline install -g semantic-release @semantic-release/gitlab @semantic-release/changelog
+    - npm --cache .npm --prefer-offline install -g semantic-release @semantic-release/gitlab conventional-changelog-conventionalcommits
+    - git config --global --add safe.directory $PWD
+  script:
+    - semantic-release
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
